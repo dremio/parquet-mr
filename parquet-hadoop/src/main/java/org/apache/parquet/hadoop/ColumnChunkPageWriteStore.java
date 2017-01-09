@@ -26,10 +26,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import org.apache.parquet.Log;
+import org.apache.parquet.bytes.ByteBufferAllocator;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.ConcatenatingByteArrayCollector;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -38,11 +40,11 @@ import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.page.PageWriteStore;
 import org.apache.parquet.column.page.PageWriter;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.format.PageHeader;
 import org.apache.parquet.format.converter.ParquetMetadataConverter;
 import org.apache.parquet.hadoop.CodecFactory.BytesCompressor;
 import org.apache.parquet.io.ParquetEncodingException;
 import org.apache.parquet.schema.MessageType;
-import org.apache.parquet.bytes.ByteBufferAllocator;
 
 class ColumnChunkPageWriteStore implements PageWriteStore {
   private static final Log LOG = Log.getLog(ColumnChunkPageWriteStore.class);
@@ -64,6 +66,7 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
     private int pageCount;
 
     private Set<Encoding> encodings = new HashSet<Encoding>();
+    private List<PageHeaderWithOffset> pageHeaderWithOffsets = new ArrayList<PageHeaderWithOffset>();
 
     private Statistics totalStatistics;
     private final ByteBufferAllocator allocator;
@@ -99,7 +102,7 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
                 + compressedSize);
       }
       tempOutputStream.reset();
-      parquetMetadataConverter.writeDataPageHeader(
+      final PageHeader pageHeader = parquetMetadataConverter.writeDataPageHeader(
           (int)uncompressedSize,
           (int)compressedSize,
           valueCount,
@@ -116,9 +119,11 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
       // by concatenating before collecting instead of collecting twice,
       // we only allocate one buffer to copy into instead of multiple.
       buf.collect(BytesInput.concat(BytesInput.from(tempOutputStream), compressedBytes));
+
       encodings.add(rlEncoding);
       encodings.add(dlEncoding);
       encodings.add(valuesEncoding);
+      pageHeaderWithOffsets.add(new PageHeaderWithOffset(pageHeader, -1, tempOutputStream.size()));
     }
 
     @Override
@@ -138,7 +143,7 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
           compressedData.size() + repetitionLevels.size() + definitionLevels.size()
       );
       tempOutputStream.reset();
-      parquetMetadataConverter.writeDataPageV2Header(
+      final PageHeader pageHeader = parquetMetadataConverter.writeDataPageV2Header(
           uncompressedSize, compressedSize,
           valueCount, nullCount, rowCount,
           statistics,
@@ -162,6 +167,7 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
               compressedData)
       );
       encodings.add(dataEncoding);
+      pageHeaderWithOffsets.add(new PageHeaderWithOffset(pageHeader, -1, tempOutputStream.size()));
     }
 
     private int toIntWithCheck(long size) {
@@ -178,11 +184,22 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
       return buf.size();
     }
 
-    public void writeToFileWriter(ParquetFileWriter writer) throws IOException {
+    public List<PageHeaderWithOffset> writeToFileWriter(ParquetFileWriter writer) throws IOException {
+      final List<PageHeaderWithOffset> allPageHeaders = new ArrayList<PageHeaderWithOffset>();
       writer.startColumn(path, totalValueCount, compressor.getCodecName());
       if (dictionaryPage != null) {
-        writer.writeDictionaryPage(dictionaryPage);
+        allPageHeaders.add(writer.writeDictionaryPage(dictionaryPage));
         encodings.add(dictionaryPage.getEncoding());
+      }
+
+      // start from current offset in output file, until now page with offsets have saved page sizes.
+      long pageOffset = writer.getPos();
+      for (PageHeaderWithOffset pageHeaderWithOffset: pageHeaderWithOffsets) {
+        final long headerSize = pageHeaderWithOffset.getHeaderByteSize();
+        pageOffset += headerSize; // skip past header
+        final long pageSize = pageHeaderWithOffset.getPageHeader().getCompressed_page_size(); // page data
+        allPageHeaders.add(new PageHeaderWithOffset(pageHeaderWithOffset.getPageHeader(), pageOffset));
+        pageOffset += pageSize; // add page size to file offset, this should point to header of next page
       }
       writer.writeDataPages(buf, uncompressedLength, compressedLength, totalStatistics, new ArrayList<Encoding>(encodings));
       writer.endColumn();
@@ -198,6 +215,7 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
       }
       encodings.clear();
       pageCount = 0;
+      return allPageHeaders;
     }
 
     @Override
@@ -238,11 +256,13 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
     return writers.get(path);
   }
 
-  public void flushToFileWriter(ParquetFileWriter writer) throws IOException {
+  public Map<ColumnDescriptor, List<PageHeaderWithOffset>> flushToFileWriter(ParquetFileWriter writer) throws IOException {
+    final Map<ColumnDescriptor, List<PageHeaderWithOffset>> pageHeaders = new HashMap<ColumnDescriptor, List<PageHeaderWithOffset>>();
     for (ColumnDescriptor path : schema.getColumns()) {
       ColumnChunkPageWriter pageWriter = writers.get(path);
-      pageWriter.writeToFileWriter(writer);
+      pageHeaders.put(path, pageWriter.writeToFileWriter(writer));
     }
+    return pageHeaders;
   }
 
 }
