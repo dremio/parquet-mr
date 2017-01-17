@@ -36,10 +36,8 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.parquet.CorruptStatistics;
 import org.apache.parquet.Log;
-import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.format.ColumnChunk;
 import org.apache.parquet.format.ColumnMetaData;
 import org.apache.parquet.format.ConvertedType;
@@ -56,8 +54,10 @@ import org.apache.parquet.format.RowGroup;
 import org.apache.parquet.format.SchemaElement;
 import org.apache.parquet.format.Statistics;
 import org.apache.parquet.format.Type;
+import org.apache.parquet.hadoop.PageHeaderWithOffset;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.io.ParquetDecodingException;
@@ -180,6 +180,15 @@ public class ParquetMetadataConverter {
           columnMetaData.getTotalUncompressedSize(),
           columnMetaData.getTotalSize(),
           columnMetaData.getFirstDataPageOffset());
+      // add page headers
+      final List<PageHeaderWithOffset> pageHeaders = columnMetaData.getPageHeaders();
+      if (pageHeaders != null && !pageHeaders.isEmpty()) {
+        for (PageHeaderWithOffset pageHeader: pageHeaders) {
+          columnChunk.meta_data.addToPage_headers(new org.apache.parquet.format.PageHeaderWithOffset(
+            pageHeader.getPageHeader(), pageHeader.getOffset()
+          ));
+        }
+      }
       columnChunk.meta_data.dictionary_page_offset = columnMetaData.getDictionaryPageOffset();
       if (!columnMetaData.getStatistics().isEmpty()) {
         columnChunk.meta_data.setStatistics(toParquetStatistics(columnMetaData.getStatistics()));
@@ -579,6 +588,13 @@ public class ParquetMetadataConverter {
               metaData.num_values,
               metaData.total_compressed_size,
               metaData.total_uncompressed_size);
+          final List<PageHeaderWithOffset> pageHeaders = new ArrayList<PageHeaderWithOffset>();
+          if (metaData.isSetPage_headers()) {
+            for (org.apache.parquet.format.PageHeaderWithOffset pageHeader : metaData.getPage_headers()) {
+              pageHeaders.add(new PageHeaderWithOffset(pageHeader.getPage_header(), pageHeader.getOffset()));
+            }
+          }
+          column.setPageHeaders(pageHeaders);
           // TODO
           // index_page_offset
           // key_value_metadata
@@ -664,7 +680,7 @@ public class ParquetMetadataConverter {
   }
 
   @Deprecated
-  public void writeDataPageHeader(
+  public PageHeader writeDataPageHeader(
       int uncompressedSize,
       int compressedSize,
       int valueCount,
@@ -672,16 +688,18 @@ public class ParquetMetadataConverter {
       org.apache.parquet.column.Encoding dlEncoding,
       org.apache.parquet.column.Encoding valuesEncoding,
       OutputStream to) throws IOException {
-    writePageHeader(newDataPageHeader(uncompressedSize,
-                                      compressedSize,
-                                      valueCount,
-                                      new org.apache.parquet.column.statistics.BooleanStatistics(),
-                                      rlEncoding,
-                                      dlEncoding,
-                                      valuesEncoding), to);
+    final PageHeader pageHeader = newDataPageHeader(uncompressedSize,
+      compressedSize,
+      valueCount,
+      new org.apache.parquet.column.statistics.BooleanStatistics(),
+      rlEncoding,
+      dlEncoding,
+      valuesEncoding);
+    writePageHeader(pageHeader, to);
+    return pageHeader;
   }
 
-  public void writeDataPageHeader(
+  public PageHeader writeDataPageHeader(
       int uncompressedSize,
       int compressedSize,
       int valueCount,
@@ -690,10 +708,10 @@ public class ParquetMetadataConverter {
       org.apache.parquet.column.Encoding dlEncoding,
       org.apache.parquet.column.Encoding valuesEncoding,
       OutputStream to) throws IOException {
-    writePageHeader(
-        newDataPageHeader(uncompressedSize, compressedSize, valueCount, statistics,
-            rlEncoding, dlEncoding, valuesEncoding),
-        to);
+    final PageHeader pageHeader = newDataPageHeader(uncompressedSize, compressedSize, valueCount, statistics,
+      rlEncoding, dlEncoding, valuesEncoding);
+    writePageHeader(pageHeader, to);
+    return pageHeader;
   }
 
   private PageHeader newDataPageHeader(
@@ -717,20 +735,21 @@ public class ParquetMetadataConverter {
     return pageHeader;
   }
 
-  public void writeDataPageV2Header(
+  public PageHeader writeDataPageV2Header(
       int uncompressedSize, int compressedSize,
       int valueCount, int nullCount, int rowCount,
       org.apache.parquet.column.statistics.Statistics statistics,
       org.apache.parquet.column.Encoding dataEncoding,
       int rlByteLength, int dlByteLength,
       OutputStream to) throws IOException {
-    writePageHeader(
-        newDataPageV2Header(
-            uncompressedSize, compressedSize,
-            valueCount, nullCount, rowCount,
-            statistics,
-            dataEncoding,
-            rlByteLength, dlByteLength), to);
+    final PageHeader pageHeader = newDataPageV2Header(
+      uncompressedSize, compressedSize,
+      valueCount, nullCount, rowCount,
+      statistics,
+      dataEncoding,
+      rlByteLength, dlByteLength);
+    writePageHeader(pageHeader, to);
+    return pageHeader;
   }
 
   private PageHeader newDataPageV2Header(
@@ -753,12 +772,13 @@ public class ParquetMetadataConverter {
     return pageHeader;
   }
 
-  public void writeDictionaryPageHeader(
+  public PageHeader writeDictionaryPageHeader(
       int uncompressedSize, int compressedSize, int valueCount,
       org.apache.parquet.column.Encoding valuesEncoding, OutputStream to) throws IOException {
     PageHeader pageHeader = new PageHeader(PageType.DICTIONARY_PAGE, uncompressedSize, compressedSize);
     pageHeader.setDictionary_page_header(new DictionaryPageHeader(valueCount, getEncoding(valuesEncoding)));
     writePageHeader(pageHeader, to);
+    return pageHeader;
   }
 
 }

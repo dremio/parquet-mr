@@ -26,6 +26,7 @@ import java.util.List;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 
+import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroup;
 import org.apache.parquet.filter2.compat.FilterCompat.Filter;
@@ -53,7 +54,11 @@ public class PhoneBookWriter {
           + "  }\n"
           + "}\n";
 
-  private static final MessageType schema = MessageTypeParser.parseMessageType(schemaString);
+  public static final MessageType schema = MessageTypeParser.parseMessageType(schemaString);
+
+  public static ColumnDescriptor getColumnDescriptor(String []path) {
+    return schema.getColumnDescription(path);
+  }
 
   public static class Location {
     private final Double lon;
@@ -225,6 +230,33 @@ public class PhoneBookWriter {
 
     writeToFile(f, users);
 
+    return f;
+  }
+
+  public static File writeToFile(List<User> users, int dictionarySize, int pageSize) throws IOException {
+    File f = File.createTempFile("phonebook", ".parquet");
+    f.deleteOnExit();
+    if (!f.delete()) {
+      throw new IOException("couldn't delete tmp file" + f);
+    }
+
+    Configuration conf = new Configuration();
+    GroupWriteSupport.setSchema(schema, conf);
+    ParquetWriter<Group> writer = new ParquetWriter<Group>(
+      new Path(f.getAbsolutePath()),
+      new GroupWriteSupport(),
+      ParquetWriter.DEFAULT_COMPRESSION_CODEC_NAME,
+      ParquetWriter.DEFAULT_BLOCK_SIZE,
+      pageSize,
+      dictionarySize,
+      true,
+      ParquetWriter.DEFAULT_IS_VALIDATING_ENABLED,
+      ParquetWriter.DEFAULT_WRITER_VERSION,
+      conf);
+    for (User u : users) {
+      writer.write(groupFromUser(u));
+    }
+    writer.close();
     return f;
   }
 

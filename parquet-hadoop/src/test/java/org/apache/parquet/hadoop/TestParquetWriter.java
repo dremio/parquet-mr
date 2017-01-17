@@ -43,6 +43,7 @@ import java.util.concurrent.Callable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
+import org.apache.parquet.hadoop.util.PageHeaderUtil;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.InvalidSchemaException;
 import org.apache.parquet.schema.Type;
@@ -95,7 +96,7 @@ public class TestParquetWriter {
         ParquetWriter<Group> writer = new ParquetWriter<Group>(
             file,
             new GroupWriteSupport(),
-            UNCOMPRESSED, 1024, 1024, 512, true, false, version, conf);
+            UNCOMPRESSED, 10240*1024, 1024*1024, 128*1024, true, false, version, conf);
         for (int i = 0; i < 1000; i++) {
           writer.write(
               f.newGroup()
@@ -124,6 +125,7 @@ public class TestParquetWriter {
         }
         reader.close();
         ParquetMetadata footer = readFooter(conf, file, NO_FILTER);
+        PageHeaderUtil.validatePageHeaders(file, footer);
         for (BlockMetaData blockMetaData : footer.getBlocks()) {
           for (ColumnChunkMetaData column : blockMetaData.getColumns()) {
             if (column.getPath().toDotString().equals("binary_field")) {

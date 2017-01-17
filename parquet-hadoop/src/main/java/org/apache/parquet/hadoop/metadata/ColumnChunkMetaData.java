@@ -18,11 +18,14 @@
  */
 package org.apache.parquet.hadoop.metadata;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.statistics.BooleanStatistics;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.hadoop.PageHeaderWithOffset;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
 
 /**
@@ -193,6 +196,16 @@ abstract public class ColumnChunkMetaData {
   }
 
 
+  /**
+   * Set page headers for this column chunk.
+   */
+  abstract public void setPageHeaders(List<PageHeaderWithOffset> pageHeaders);
+
+  /**
+   * @return page headers for this column
+   */
+  abstract public List<PageHeaderWithOffset> getPageHeaders();
+
   @Override
   public String toString() {
     return "ColumnMetaData{" + properties.toString() + ", " + getFirstDataPageOffset() + "}";
@@ -207,6 +220,7 @@ class IntColumnChunkMetaData extends ColumnChunkMetaData {
   private final int totalSize;
   private final int totalUncompressedSize;
   private final Statistics statistics;
+  private List<PageHeaderWithOffset> pageHeaders = null;
 
   /**
    * @param path column identifier
@@ -302,7 +316,18 @@ class IntColumnChunkMetaData extends ColumnChunkMetaData {
   public Statistics getStatistics() {
    return statistics;
   }
+
+  @Override
+  public List<PageHeaderWithOffset> getPageHeaders() {
+    return pageHeaders;
+  }
+
+  @Override
+  public void setPageHeaders(List<PageHeaderWithOffset> pageHeaders) {
+    this.pageHeaders = pageHeaders;
+  }
 }
+
 class LongColumnChunkMetaData extends ColumnChunkMetaData {
 
   private final long firstDataPageOffset;
@@ -311,6 +336,7 @@ class LongColumnChunkMetaData extends ColumnChunkMetaData {
   private final long totalSize;
   private final long totalUncompressedSize;
   private final Statistics statistics;
+  private List<PageHeaderWithOffset> pageHeaders = null;
 
   /**
    * @param path column identifier
@@ -384,6 +410,16 @@ class LongColumnChunkMetaData extends ColumnChunkMetaData {
    */
   public Statistics getStatistics() {
    return statistics;
+  }
+
+  @Override
+  public List<PageHeaderWithOffset> getPageHeaders() {
+    return pageHeaders;
+  }
+
+  @Override
+  public void setPageHeaders(List<PageHeaderWithOffset> pageHeaders) {
+    this.pageHeaders = pageHeaders;
   }
 }
 

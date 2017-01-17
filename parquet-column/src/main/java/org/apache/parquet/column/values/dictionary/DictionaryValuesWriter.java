@@ -155,34 +155,49 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
     return encodedValues.size() * 4 + dictionaryByteSize;
   }
 
-  @Override
-  public BytesInput getBytes() {
-    int maxDicId = getDictionarySize() - 1;
+  /**
+   * Get bytes for given encoded values
+   * Note that this code is simply encoding values so should not have any side effects except keeping track of encoders
+   * @param encodedValues dictionary ids for encoded values
+   * @return dictionary encoded data
+   */
+  public BytesInput getBytes(IntList encodedValues) {
+    final int maxDicId = getDictionarySize() - 1;
     if (DEBUG) LOG.debug("max dic id " + maxDicId);
-    int bitWidth = BytesUtils.getWidthFromMaxInt(maxDicId);
-    int initialSlabSize =
-        CapacityByteArrayOutputStream.initialSlabSizeHeuristic(MIN_INITIAL_SLAB_SIZE, maxDictionaryByteSize, 10);
+    final int bitWidth = BytesUtils.getWidthFromMaxInt(maxDicId);
+    final int initialSlabSize =
+      CapacityByteArrayOutputStream.initialSlabSizeHeuristic(MIN_INITIAL_SLAB_SIZE, maxDictionaryByteSize, 10);
 
-    RunLengthBitPackingHybridEncoder encoder =
-        new RunLengthBitPackingHybridEncoder(bitWidth, initialSlabSize, maxDictionaryByteSize, this.allocator);
+    final RunLengthBitPackingHybridEncoder encoder =
+      new RunLengthBitPackingHybridEncoder(bitWidth, initialSlabSize, maxDictionaryByteSize, this.allocator);
     encoders.add(encoder);
-    IntIterator iterator = encodedValues.iterator();
+    final IntIterator iterator = encodedValues.iterator();
     try {
       while (iterator.hasNext()) {
         encoder.writeInt(iterator.next());
       }
       // encodes the bit width
-      byte[] bytesHeader = new byte[] { (byte) bitWidth };
-      BytesInput rleEncodedBytes = encoder.toBytes();
+      final byte[] bytesHeader = new byte[] { (byte) bitWidth };
+      final BytesInput rleEncodedBytes = encoder.toBytes();
       if (DEBUG) LOG.debug("rle encoded bytes " + rleEncodedBytes.size());
-      BytesInput bytes = concat(BytesInput.from(bytesHeader), rleEncodedBytes);
-      // remember size of dictionary when we last wrote a page
-      lastUsedDictionarySize = getDictionarySize();
-      lastUsedDictionaryByteSize = dictionaryByteSize;
+      final BytesInput bytes = concat(BytesInput.from(bytesHeader), rleEncodedBytes);
       return bytes;
     } catch (IOException e) {
       throw new ParquetEncodingException("could not encode the values", e);
     }
+  }
+
+  public void consumeDictionary() {
+    // remember size of dictionary when we last wrote a page
+    lastUsedDictionarySize = getDictionarySize();
+    lastUsedDictionaryByteSize = dictionaryByteSize;
+  }
+
+  @Override
+  public BytesInput getBytes() {
+    final BytesInput data = getBytes(encodedValues);
+    consumeDictionary();
+    return data;
   }
 
   @Override

@@ -37,10 +37,14 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
+import org.apache.parquet.hadoop.util.PageHeaderUtil;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.InOrder;
@@ -99,6 +103,7 @@ public class TestColumnChunkPageWriteStore {
 
     {
       ParquetFileWriter writer = new ParquetFileWriter(conf, schema, file);
+      Map<ColumnPath, List<PageHeaderWithOffset>> pageHeaders;
       writer.start();
       writer.startBlock(rowCount);
       {
@@ -110,13 +115,15 @@ public class TestColumnChunkPageWriteStore {
             dataEncoding, data,
             statistics);
         store.flushToFileWriter(writer);
+        pageHeaders = store.getPageHeaders();
       }
-      writer.endBlock();
+      writer.endBlock(pageHeaders);
       writer.end(new HashMap<String, String>());
     }
 
     {
       ParquetMetadata footer = ParquetFileReader.readFooter(conf, file, NO_FILTER);
+      PageHeaderUtil.validatePageHeaders(file, footer);
       ParquetFileReader reader = new ParquetFileReader(
           conf, footer.getFileMetaData(), file, footer.getBlocks(), schema.getColumns());
       PageReadStore rowGroup = reader.readNextRowGroup();
