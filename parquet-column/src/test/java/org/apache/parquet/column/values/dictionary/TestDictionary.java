@@ -18,26 +18,27 @@
  */
 package org.apache.parquet.column.values.dictionary;
 
-import static org.junit.Assert.assertEquals;
 import static org.apache.parquet.column.Encoding.PLAIN;
 import static org.apache.parquet.column.Encoding.PLAIN_DICTIONARY;
+import static org.apache.parquet.column.ParquetProperties.WriterVersion.PARQUET_2_0;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.BINARY;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.DOUBLE;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FLOAT;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
+import static org.junit.Assert.assertEquals;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 
-import org.junit.Assert;
-import org.junit.Test;
-
-import org.apache.parquet.bytes.DirectByteBufferAllocator;
 import org.apache.parquet.bytes.BytesInput;
+import org.apache.parquet.bytes.DirectByteBufferAllocator;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Dictionary;
 import org.apache.parquet.column.Encoding;
+import org.apache.parquet.column.ParquetProperties;
+import org.apache.parquet.column.SortedDictionary;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.column.values.ValuesWriter;
@@ -52,6 +53,8 @@ import org.apache.parquet.column.values.plain.PlainValuesReader;
 import org.apache.parquet.column.values.plain.PlainValuesWriter;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
+import org.junit.Assert;
+import org.junit.Test;
 
 public class TestDictionary {
 
@@ -531,5 +534,167 @@ public class TestDictionary {
     assertEquals(encoding, cw.getEncoding());
     cw.reset();
     return bytes;
+  }
+
+
+  @Test
+  public void testSortedDictionaryBinary() throws Exception {
+    final ColumnDescriptor column = new ColumnDescriptor(new String[] {"foo"}, BINARY, 0, 0);
+    final ParquetProperties parquetProperties = new ParquetProperties(4096, PARQUET_2_0, true);
+
+    ValuesWriter cw = newPlainBinaryDictionaryValuesWriter(4096, 10000);
+    cw.writeBytes(Binary.fromString("b"));
+    cw.writeBytes(Binary.fromString("a"));
+    cw.writeBytes(Binary.fromString("z"));
+    cw.writeBytes(Binary.fromString("b"));
+    cw.writeBytes(Binary.fromString("c"));
+    cw.writeBytes(Binary.fromString("d"));
+    cw.writeBytes(Binary.fromString("a"));
+    cw.writeBytes(Binary.fromString("z"));
+    cw.writeBytes(Binary.fromString("b"));
+
+    // use dictionary before getting dictionary page
+    cw.getBytes();
+    cw.getEncoding();
+    DictionaryPage dictionaryPage = cw.toDictPageAndClose();
+    SortedDictionary sortedDictionary = new SortedDictionary(dictionaryPage, column, parquetProperties);
+
+    final Dictionary dictionary = PLAIN.initDictionary(column, sortedDictionary.getSortedDictionaryPage());
+    assertEquals(4, dictionary.getMaxId());
+    assertEquals("a", dictionary.decodeToBinary(0).toStringUsingUTF8());
+    assertEquals("b", dictionary.decodeToBinary(1).toStringUsingUTF8());
+    assertEquals("c", dictionary.decodeToBinary(2).toStringUsingUTF8());
+    assertEquals("d", dictionary.decodeToBinary(3).toStringUsingUTF8());
+    assertEquals("z", dictionary.decodeToBinary(4).toStringUsingUTF8());
+  }
+
+  @Test
+  public void testSortedDictionaryLong() throws IOException {
+    final ColumnDescriptor column = new ColumnDescriptor(new String[] {"foo"}, INT64, 0, 0);
+    final ParquetProperties parquetProperties = new ParquetProperties(4096, PARQUET_2_0, true);
+
+    ValuesWriter cw = newPlainLongDictionaryValuesWriter(4096, 10000);
+    cw.writeLong(10);
+    cw.writeLong(0);
+    cw.writeLong(-1);
+    cw.writeLong(2);
+    cw.writeLong(1);
+    cw.writeLong(2);
+    cw.writeLong(9);
+    cw.writeLong(10);
+    cw.writeLong(-1);
+
+    // use dictionary before getting dictionary page
+    cw.getBytes();
+    cw.getEncoding();
+    DictionaryPage dictionaryPage = cw.toDictPageAndClose();
+    SortedDictionary sortedDictionary = new SortedDictionary(dictionaryPage, column, parquetProperties);
+
+    final Dictionary dictionary = PLAIN.initDictionary(column, sortedDictionary.getSortedDictionaryPage());
+    assertEquals(5, dictionary.getMaxId());
+    assertEquals(-1, dictionary.decodeToLong(0));
+    assertEquals(0, dictionary.decodeToLong(1));
+    assertEquals(1, dictionary.decodeToLong(2));
+    assertEquals(2, dictionary.decodeToLong(3));
+    assertEquals(9, dictionary.decodeToLong(4));
+    assertEquals(10, dictionary.decodeToLong(5));
+  }
+
+  @Test
+  public void testSortedDictionaryInteger() throws IOException {
+    final ColumnDescriptor column = new ColumnDescriptor(new String[] {"foo"}, INT32, 0, 0);
+    final ParquetProperties parquetProperties = new ParquetProperties(4096, PARQUET_2_0, true);
+
+    ValuesWriter cw = newPlainIntegerDictionaryValuesWriter(4096, 10000);
+    cw.writeInteger(10);
+    cw.writeInteger(0);
+    cw.writeInteger(-1);
+    cw.writeInteger(2);
+    cw.writeInteger(1);
+    cw.writeInteger(2);
+    cw.writeInteger(9);
+    cw.writeInteger(-2);
+    cw.writeInteger(20);
+    cw.writeInteger(10);
+    cw.writeInteger(-1);
+
+    // use dictionary before getting dictionary page
+    cw.getBytes();
+    cw.getEncoding();
+    DictionaryPage dictionaryPage = cw.toDictPageAndClose();
+    SortedDictionary sortedDictionary = new SortedDictionary(dictionaryPage, column, parquetProperties);
+
+    final Dictionary dictionary = PLAIN.initDictionary(column, sortedDictionary.getSortedDictionaryPage());
+    assertEquals(7, dictionary.getMaxId());
+    assertEquals(-2, dictionary.decodeToInt(0));
+    assertEquals(-1, dictionary.decodeToInt(1));
+    assertEquals(0, dictionary.decodeToInt(2));
+    assertEquals(1, dictionary.decodeToInt(3));
+    assertEquals(2, dictionary.decodeToInt(4));
+    assertEquals(9, dictionary.decodeToInt(5));
+    assertEquals(10, dictionary.decodeToInt(6));
+    assertEquals(20, dictionary.decodeToInt(7));
+  }
+
+  @Test
+  public void testSortedDictionaryDouble() throws IOException {
+    final ColumnDescriptor column = new ColumnDescriptor(new String[] {"foo"}, DOUBLE, 0, 0);
+    final ParquetProperties parquetProperties = new ParquetProperties(4096, PARQUET_2_0, true);
+
+    ValuesWriter cw = newPlainDoubleDictionaryValuesWriter(4096, 10000);
+    cw.writeDouble(10.12);
+    cw.writeDouble(12.12);
+    cw.writeDouble(0.12);
+    cw.writeDouble(-1);
+    cw.writeDouble(12.12);
+    cw.writeDouble(11.11);
+    cw.writeDouble(1);
+    cw.writeDouble(-1);
+
+    // use dictionary before getting dictionary page
+    cw.getBytes();
+    cw.getEncoding();
+    DictionaryPage dictionaryPage = cw.toDictPageAndClose();
+    SortedDictionary sortedDictionary = new SortedDictionary(dictionaryPage, column, parquetProperties);
+
+    final Dictionary dictionary = PLAIN.initDictionary(column, sortedDictionary.getSortedDictionaryPage());
+    assertEquals(5, dictionary.getMaxId());
+    assertEquals(-1, dictionary.decodeToDouble(0), 0);
+    assertEquals(0.12, dictionary.decodeToDouble(1), 0);
+    assertEquals(1, dictionary.decodeToDouble(2), 0);
+    assertEquals(10.12, dictionary.decodeToDouble(3), 0);
+    assertEquals(11.11, dictionary.decodeToDouble(4), 0);
+    assertEquals(12.12, dictionary.decodeToDouble(5), 0);
+  }
+
+  @Test
+  public void testSortedDictionaryFloat() throws IOException {
+    final ColumnDescriptor column = new ColumnDescriptor(new String[] {"foo"}, FLOAT, 0, 0);
+    final ParquetProperties parquetProperties = new ParquetProperties(4096, PARQUET_2_0, true);
+
+    ValuesWriter cw = newPlainFloatDictionaryValuesWriter(4096, 10000);
+    cw.writeFloat(10.12f);
+    cw.writeFloat(12.12f);
+    cw.writeFloat(0.12f);
+    cw.writeFloat(-1f);
+    cw.writeFloat(12.12f);
+    cw.writeFloat(11.11f);
+    cw.writeFloat(1f);
+    cw.writeFloat(-1f);
+
+    // use dictionary before getting dictionary page
+    cw.getBytes();
+    cw.getEncoding();
+    DictionaryPage dictionaryPage = cw.toDictPageAndClose();
+    SortedDictionary sortedDictionary = new SortedDictionary(dictionaryPage, column, parquetProperties);
+
+    final Dictionary dictionary = PLAIN.initDictionary(column, sortedDictionary.getSortedDictionaryPage());
+    assertEquals(5, dictionary.getMaxId());
+    assertEquals(-1f, dictionary.decodeToFloat(0), 0);
+    assertEquals(0.12f, dictionary.decodeToFloat(1), 0);
+    assertEquals(1f, dictionary.decodeToFloat(2), 0);
+    assertEquals(10.12f, dictionary.decodeToFloat(3), 0);
+    assertEquals(11.11f, dictionary.decodeToFloat(4), 0);
+    assertEquals(12.12f, dictionary.decodeToFloat(5), 0);
   }
 }
